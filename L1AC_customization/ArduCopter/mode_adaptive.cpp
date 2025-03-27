@@ -40,13 +40,16 @@ bool ModeAdaptive::init(bool ignore_checks)
     omega_prev = omega_hat_prev;
 
     Vector3f dummyPosition;
-    int locAvailable = ahrs.get_relative_position_NED_origin(dummyPosition);
+    // int locAvailable = ahrs.get_relative_position_NED_origin(dummyPosition);
+
+
+    /* //!remove the need for positioning
     if (!locAvailable)
     {
         gcs().send_text(MAV_SEVERITY_CRITICAL, "Location unavailable. Please reboot.");
         motorEnable = 0; // if the location is unavailable, disable the flight.
     }
-
+    */
     // initialize rotation matrix
     Quaternion q;
     q.rotation_matrix(R_prev); // transforming the quaternion q to rotation matrix R
@@ -115,6 +118,26 @@ void ModeAdaptive::run()
         break;
     }
 
+    float target_roll, target_pitch;
+    get_pilot_desired_lean_angles(target_roll, target_pitch, copter.aparm.angle_max, copter.aparm.angle_max);
+
+    float target_yaw_rate = get_pilot_desired_yaw_rate(copter.channel_yaw->norm_input_dz());
+    float pilot_desired_throttle = get_pilot_desired_throttle();
+
+    VectorN<float, 4> thrustMomentCmd;
+    thrustMomentCmd[0] = pilot_desired_throttle;
+    thrustMomentCmd[1] = target_roll;
+    thrustMomentCmd[2] = target_pitch;
+    thrustMomentCmd[3] = target_yaw_rate;
+
+    VectorN<float, 4> augmentedCmd = L1AdaptiveAugmentation(thrustMomentCmd);
+
+    attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(
+        augmentedCmd[1], augmentedCmd[2], augmentedCmd[3]);
+    )
+
+    attitude_control->set_throttle_out(augmentedCmd[0], true, g.throttle_filt);
+    /*
     // ===================================================
     // start custom code by ACRL
 
@@ -338,6 +361,7 @@ void ModeAdaptive::run()
                        (double)motorPWM[3]);
     // end custom code by ACRL
     // ===================================================
+    */
 }
 
 VectorN<float, 4> ModeAdaptive::geometricController(Vector3f targetPos,
