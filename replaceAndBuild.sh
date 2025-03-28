@@ -1,0 +1,2 @@
+./replacefiles.sh
+./buildforcrazyflie.sh

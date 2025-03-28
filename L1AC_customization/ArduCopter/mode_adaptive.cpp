@@ -59,7 +59,7 @@ bool ModeAdaptive::init(bool ignore_checks)
     lpf1_prev = lpf1_prev * 0; // initialize lpf1_prev
     lpf2_prev = lpf2_prev * 0; // initialize lpf2_prev
 
-    trajIndex = g.trajIndex; // fix the trajectory
+    // trajIndex = g.trajIndex; // fix the trajectory
     radiusX = g.circRadiusX; // circle radius or figure8's x radius
     radiusY = g.circRadiusY; // figure8's y radius (not used for circle radius)
 
@@ -73,8 +73,6 @@ bool ModeAdaptive::init(bool ignore_checks)
 
 void ModeAdaptive::run()
 {
-    static uint32_t initialTime = 0; // store previous system time
-
     if (!motors->armed())
     {
         // Motors should be Stopped
@@ -123,7 +121,7 @@ void ModeAdaptive::run()
 
     float target_yaw_rate = get_pilot_desired_yaw_rate(copter.channel_yaw->norm_input_dz());
     float pilot_desired_throttle = get_pilot_desired_throttle();
-
+    
     VectorN<float, 4> thrustMomentCmd;
     thrustMomentCmd[0] = pilot_desired_throttle;
     thrustMomentCmd[1] = target_roll;
@@ -134,234 +132,11 @@ void ModeAdaptive::run()
 
     attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(
         augmentedCmd[1], augmentedCmd[2], augmentedCmd[3]);
-    )
 
     attitude_control->set_throttle_out(augmentedCmd[0], true, g.throttle_filt);
-    /*
-    // ===================================================
-    // start custom code by ACRL
-
-    // load current time
-    uint32_t tnow = 0;
-    float currentTime = 0;              // This is the duration since the first time the Adaptive flight mode is entered.
-    static float currentTimeLast = 0;   // This variable stores the previous value of currentTime.
-    float timeInThisRun = 0;            // This is the duration since the Adaptive flight mode is entered most recently.
-    static float timeBiasInThisRun = 0; // This is the most recent time that the Adaptive mode is entered
-    if (initialTime == 0)
-    {
-        initialTime = AP_HAL::micros();
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Entering Adaptive mode for the first time.");
-    }
-    else
-    {
-        tnow = AP_HAL::micros();
-        currentTime = 0.000001f * (tnow - initialTime);
-        if (currentTime - currentTimeLast <= 0.1) // this means the Adaptive mode hasn't been changed.
-        {
-            timeInThisRun = currentTime - timeBiasInThisRun;
-        }
-        else // reset timeInThisRun
-        {
-            timeBiasInThisRun = currentTime;
-            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Start time for this run: %f s.", currentTime);
-        }
-    }
-
-    Vector3f targetPos;
-    Vector3f targetVel;
-    Vector3f targetAcc;
-    Vector3f targetJerk;
-    Vector3f targetSnap;
-    Vector2f targetYaw;
-    Vector2f targetYaw_dot;
-    Vector2f targetYaw_ddot;
-
-    // evaluate trajectories
-    if (timeInThisRun < 2)
-    {
-        // takeoff from (x,y,z) = (0,0,0) to (0,0,-1) in 2 secondss
-        ACRL_trajectory_takeoff(timeInThisRun, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-    }
-    else
-    {
-        switch (trajIndex)
-        {
-        case 1: // circular trajectory with variable yaw 
-        {   
-            #if (!REAL_OR_SITL) // SITL
-                const float timeOffset = 2;
-                ACRL_trajectory_circle_variable_yaw(timeInThisRun, radiusX, timeOffset, targetSpeed, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            #elif (REAL_OR_SITL) // Real 
-            if (timeInThisRun >= 2 && timeInThisRun < 4)
-            {
-                // transition from (0,0,-1) to (0,-radiusX,-1) in 2 seconds
-                const float timeOffset = 2;
-                ACRL_trajectory_transition_to_start(timeInThisRun, radiusX, timeOffset, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            }
-            else if (timeInThisRun >= 4)
-            {   
-                // start the circle trajectory
-                const float timeOffset = 4;
-                ACRL_trajectory_circle_variable_yaw(timeInThisRun, radiusX, timeOffset, targetSpeed, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            }
-            #endif
-            break;
-        }
-        case 2: // circular trajectory with fixed yaw 
-        {
-            #if (!REAL_OR_SITL) // SITL
-                const float timeOffset = 2;
-                ACRL_trajectory_circle_fixed_yaw(timeInThisRun, radiusX, timeOffset, targetSpeed, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            #elif (REAL_OR_SITL) // Real 
-            if (timeInThisRun >= 2 && timeInThisRun < 4)
-            {
-                // transition from (0,0,-1) to (0,-radiusX,-1) in 2 seconds
-                const float timeOffset = 2;
-                ACRL_trajectory_transition_to_start(timeInThisRun, radiusX, timeOffset, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            }
-            else if (timeInThisRun >= 4)
-            {   
-                // start the circle trajectory
-                const float timeOffset = 4;
-                ACRL_trajectory_circle_fixed_yaw(timeInThisRun, radiusX, timeOffset, targetSpeed, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            }
-            #endif
-            break;
-        }
-        case 3: // figure8 trajectory with fixed yaw 
-        {
-            ACRL_trajectory_figure8_fixed_yaw(timeInThisRun, radiusX, radiusY, targetSpeed, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            break;
-        }
-        case 4: // cy45 add: figure8 trajectory with tilted altitude
-        {
-            ACRL_trajectory_figure8_tilted(timeInThisRun, radiusX, radiusY, targetSpeed, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            break;
-        }
-        default:
-        {
-            // if the case is not covered in the previous cases, then hover.
-            GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Wrong trajectory index. Drone will hover.");
-            // set targetSpeed = 0 below to enfornce hover
-            ACRL_trajectory_figure8_fixed_yaw(timeInThisRun, radiusX, radiusY, 0, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-            break;
-        }
-        }
-    }
-
-    // initialize for landing mode
-    if (g.LandFlag && !landingTriggered) 
-    {
-        landingTriggered = 1; // set landingTriggered to 1
-        landingTimeOffset = timeInThisRun; // store the time offset
-    }
-
-    // executing landing mode
-    if (g.LandFlag && landingTriggered) // switch to landing mode
-    {   
-        if(ahrs.get_relative_position_NED_origin(currentPosition)){;}// save current position
-        if(ahrs.get_velocity_NED(currentVelocity)){;}
-        currentYaw = ahrs.get_yaw(); // save current yaw
-        if (currentPosition[2] >= -0.3) // if the initial altitude upon entering land mode is within 30 cm, then set landComplete to 1 to overwrite the motor throttle to 1.
-        {   
-            if (!landingComplete)
-            {
-                landingComplete = 1;
-                gcs().send_text(MAV_SEVERITY_INFO, "Quadrotor is on the ground. Motor commands set to minimum.");
-            }       
-        }
-        else 
-        {
-            float decRate = 1; // 1m/s^2
-            landingComplete = ACRL_trajectory_land(timeInThisRun - landingTimeOffset, currentPosition, currentVelocity, currentYaw, decRate, &targetPos, &targetVel, &targetAcc, &targetJerk, &targetSnap, &targetYaw, &targetYaw_dot, &targetYaw_ddot);
-        }   
-    }
-
-    VectorN<float, 4> thrustMomentCmd;
-    thrustMomentCmd = geometricController(targetPos, targetVel, targetAcc, targetJerk, targetSnap, targetYaw, targetYaw_dot, targetYaw_ddot); // only support constant yaw
-
-    uint8_t LandFlag = 0;
-    LandFlag = g.LandFlag;
-    AP::logger().Write("L1AB", "thrust,mx,my,mz,landflag,landtrig,landcomp", "ffffBBB",
-                       (double)thrustMomentCmd[0],
-                       (double)thrustMomentCmd[1],
-                       (double)thrustMomentCmd[2],
-                       (double)thrustMomentCmd[3],
-                       LandFlag,
-                       landingTriggered,
-                       landingComplete);
-
-    // L1 adaptive augmentation
-    VectorN<float, 4> L1thrustMomentCmd;
-    L1thrustMomentCmd = L1AdaptiveAugmentation(thrustMomentCmd);
-
-    // uncomment the lines below if you want to inject uncertainty to the control channels
-    // thrustMomentCmd[0] = thrustMomentCmd[0] + 5 * sinf(0.5 * currentTime);
-    // thrustMomentCmd[1] = thrustMomentCmd[1] + 0.1 * sinf( currentTime);
-    // thrustMomentCmd[2] = thrustMomentCmd[2] + 0.05 * sinf( 2 * currentTime);
-
-    // motor mixing
-    VectorN<float, 4> motorPWM;
-    motorPWM = motorMixing(thrustMomentCmd + L1thrustMomentCmd);
-
-    // motorPWM saturation
-    if (motorPWM[0] < 0) {motorPWM[0] = 0;}
-    else if (motorPWM[0] > 100) {motorPWM[0] = 100;}
-    if (motorPWM[1] < 0) {motorPWM[1] = 0;}
-    else if (motorPWM[1] > 100) {motorPWM[1] = 100;}
-    if (motorPWM[2] < 0) {motorPWM[2] = 0;}
-    else if (motorPWM[2] > 100) {motorPWM[2] = 100;}
-    if (motorPWM[3] < 0) {motorPWM[3] = 0;}
-    else if (motorPWM[3] > 100) {motorPWM[3] = 100;}
-
-    // disarm the vehicle by setting PWM to 1 when landing is completed
-    if (landingComplete)
-    {
-        motorPWM[0] = 1;
-        motorPWM[1] = 1;
-        motorPWM[2] = 1;
-        motorPWM[3] = 1;
-    }
-
-    if (motors->armed()) // only command the motor PWM when the vehicle is armed.
-    {
-        motors->rc_write(0, 1000 + motorEnable * 10 * motorPWM[0]); // manual set motor speed: PWM_MIN/MAX has been forced to 1000/2000
-        motors->rc_write(1, 1000 + motorEnable * 10 * motorPWM[1]); // rc_write is called from <AP_Motors/AP_Motors_Class.h>
-        motors->rc_write(2, 1000 + motorEnable * 10 * motorPWM[2]);
-        motors->rc_write(3, 1000 + motorEnable * 10 * motorPWM[3]);
-    }
-    else 
-    {
-        GCS_SEND_TEXT(MAV_SEVERITY_ERROR, "Vehicle not armed.");
-        motorEnable = 0; // if the vehicle is not armed, disable the flight.
-    }
-    currentTimeLast = currentTime; // store the value of currentTime
-
-    // logging
-    Vector3f statePos;
-
-    int locAvailable = ahrs.get_relative_position_NED_origin(statePos);
-    if (!locAvailable)
-    {
-        gcs().send_text(MAV_SEVERITY_CRITICAL, "Location unavailable.");
-    }
-
-    AP::logger().Write("L1AC", "currentT,thisRunT,xxd,yyd,zzd,xx,yy,zz,m1,m2,m3,m4", "ffffffffffff",
-                       (double)currentTime,
-                       (double)timeInThisRun,
-                       (double)targetPos.x,
-                       (double)targetPos.y,
-                       (double)targetPos.z,
-                       (double)statePos.x,
-                       (double)statePos.y,
-                       (double)statePos.z,
-                       (double)motorPWM[0],
-                       (double)motorPWM[1],
-                       (double)motorPWM[2],
-                       (double)motorPWM[3]);
-    // end custom code by ACRL
-    // ===================================================
-    */
+    
+    
+    
 }
 
 VectorN<float, 4> ModeAdaptive::geometricController(Vector3f targetPos,
