@@ -612,6 +612,54 @@ const AP_Param::Info Copter::var_info[] = {
     // @Range: 0 1
     // @User: Advanced
     GSCALAR(LandFlag, "LANDFLAG", LANDFLAG_DEFAULT),
+
+    // @Param: CUSTOM_KPp
+    // @DisplayName: coefficient for pitch p term 
+    // @Description: the p term coefficient for the pitch
+    // @Units: none 
+    // @Range: 0-1
+    // @User: Advanced
+    GSCALAR(custom_KPp, "Custom_KPp", CUSTOM_KPP_DEFAULT),
+
+    // @Param: CUSTOM_KPr
+    // @DisplayName: coefficient for roll p term 
+    // @Description: the p term coefficient for the roll
+    // @Units: none 
+    // @Range: 0-1
+    // @User: Advanced
+    GSCALAR(custom_KPr, "Custom_KPr", CUSTOM_KPR_DEFAULT),
+
+    // @Param: CUSTOM_KPy
+    // @DisplayName: coefficient for yaw rate p term 
+    // @Description: the p term coefficient for the yaw rate 
+    // @Units: none 
+    // @Range: 0-1
+    // @User: Advanced
+    GSCALAR(custom_KPy, "Custom_KPy", CUSTOM_KPY_DEFAULT),
+    
+    // @Param: CUSTOM_KDp
+    // @DisplayName: coefficient for pitch d term 
+    // @Description: the d term coefficient for the pitch
+    // @Units: none 
+    // @Range: 0-1
+    // @User: Advanced
+    GSCALAR(custom_KDp, "Custom_KDp", CUSTOM_KDP_DEFAULT),
+
+    // @Param: CUSTOM_KDr
+    // @DisplayName: coefficient for roll d term 
+    // @Description: the d term coefficient for the roll
+    // @Units: none 
+    // @Range: 0-1
+    // @User: Advanced
+    GSCALAR(custom_KDr, "Custom_KDr", CUSTOM_KDR_DEFAULT),
+    
+    // @Param: CUSTOM_KThrust
+    // @DisplayName: coefficient for thrust
+    // @Description: the coefficient for the thrust factor
+    // @Units: none 
+    // @Range: 0-1
+    // @User: Advanced
+    GSCALAR(custom_KThrust, "Custom_KThrust", CUSTOM_KTHRUST_DEFAULT),
 #endif
 
     // ACRO_RP_EXPO moved to Command Model class

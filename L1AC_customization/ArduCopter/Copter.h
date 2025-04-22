@@ -1027,7 +1027,6 @@ private:
 #if MODE_ADAPTIVE_ENABLED == ENABLED
     ModeAdaptive mode_adaptive;
 #endif
-
     // mode.cpp
     Mode *mode_from_mode_num(const Mode::Number mode);
     void exit_mode(Mode *&old_flightmode, Mode *&new_flightmode);

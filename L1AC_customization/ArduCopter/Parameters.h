@@ -417,6 +417,13 @@ public:
         k_param_trajIndex,         // index of the trajectory to run
         k_param_LandFlag = 280,    // flag of landing 
 
+        k_param_custom_KPp,
+        k_param_custom_KPr,
+        k_param_custom_KPy,
+        k_param_custom_KDp,
+        k_param_custom_KDr,
+        k_param_custom_KThrust,
+
         // the k_param_* space is 9-bits in size
         // 511: reserved
     };
@@ -523,6 +530,13 @@ public:
     AP_Float circRadiusY; // figure8's y radius (not used for circle radius)
     AP_Int8 trajIndex;    // index of the trajectory to run
     AP_Int8 LandFlag;     // flag of landing 
+
+    AP_Float custom_KPp;
+    AP_Float custom_KPr;
+    AP_Float custom_KPy;
+    AP_Float custom_KDp;
+    AP_Float custom_KDr;
+    AP_Float custom_KThrust;
 
 #if MODE_THROW_ENABLED == ENABLED
     AP_Enum<ModeThrow::PreThrowMotorState>         throw_motor_start;

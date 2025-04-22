@@ -39,17 +39,8 @@ bool ModeAdaptive::init(bool ignore_checks)
     omega_hat_prev = AP::ahrs().get_gyro(); // state predictor value of rotational speed
     omega_prev = omega_hat_prev;
 
-    Vector3f dummyPosition;
-    // int locAvailable = ahrs.get_relative_position_NED_origin(dummyPosition);
 
 
-    /* //!remove the need for positioning
-    if (!locAvailable)
-    {
-        gcs().send_text(MAV_SEVERITY_CRITICAL, "Location unavailable. Please reboot.");
-        motorEnable = 0; // if the location is unavailable, disable the flight.
-    }
-    */
     // initialize rotation matrix
     Quaternion q;
     q.rotation_matrix(R_prev); // transforming the quaternion q to rotation matrix R
@@ -59,37 +50,43 @@ bool ModeAdaptive::init(bool ignore_checks)
     lpf1_prev = lpf1_prev * 0; // initialize lpf1_prev
     lpf2_prev = lpf2_prev * 0; // initialize lpf2_prev
 
-    // trajIndex = g.trajIndex; // fix the trajectory
-    radiusX = g.circRadiusX; // circle radius or figure8's x radius
-    radiusY = g.circRadiusY; // figure8's y radius (not used for circle radius)
-
-    targetSpeed = g.circSpeed; // final tangent speed is read from the parameter circSpeed
-
     landingTriggered = 0; // set the indicator to 0  
-
-    gcs().send_text(MAV_SEVERITY_INFO, "Adpative mode initialization is done.");
+    if (motorEnable == 1) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Adaptive mode initialization is done with motors enabled");
+    } else {
+        gcs().send_text(MAV_SEVERITY_INFO, "Adpative mode initialization is done.");
+    }
     return true;
 }
 
 void ModeAdaptive::run()
 {
-    if (!motors->armed())
-    {
+    // apply simple mode transform to pilot inputs
+    update_simple_mode();
+    // convert pilot input to lean angles
+    float target_roll, target_pitch;
+    get_pilot_desired_lean_angles(target_roll, target_pitch, copter.aparm.angle_max, copter.aparm.angle_max);
+
+    // get pilot's desired yaw rate
+    float target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->norm_input_dz());
+
+    if (!motors->armed()) {
         // Motors should be Stopped
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::SHUT_DOWN);
-    }
-    else if (copter.ap.throttle_zero)
-    {
+    } else if (copter.ap.throttle_zero
+               || (copter.air_mode == AirMode::AIRMODE_ENABLED && motors->get_spool_state() == AP_Motors::SpoolState::SHUT_DOWN)) {
+        // throttle_zero is never true in air mode, but the motors should be allowed to go through ground idle
+        // in order to facilitate the spoolup block
+
         // Attempting to Land
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
-    }
-    else
-    {
+    } else {
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
     }
 
-    switch (motors->get_spool_state())
-    {
+    float pilot_desired_throttle = get_pilot_desired_throttle();
+
+    switch (motors->get_spool_state()) {
     case AP_Motors::SpoolState::SHUT_DOWN:
         // Motors Stopped
         attitude_control->reset_yaw_target_and_rate();
@@ -104,8 +101,7 @@ void ModeAdaptive::run()
 
     case AP_Motors::SpoolState::THROTTLE_UNLIMITED:
         // clear landing flag above zero throttle
-        if (!motors->limit.throttle_lower)
-        {
+        if (!motors->limit.throttle_lower) {
             set_land_complete(false);
         }
         break;
@@ -115,246 +111,68 @@ void ModeAdaptive::run()
         // do nothing
         break;
     }
-
-    float target_roll, target_pitch;
-    get_pilot_desired_lean_angles(target_roll, target_pitch, copter.aparm.angle_max, copter.aparm.angle_max);
-
-    float target_yaw_rate = get_pilot_desired_yaw_rate(copter.channel_yaw->norm_input_dz());
-    float pilot_desired_throttle = get_pilot_desired_throttle();
-    
     VectorN<float, 4> thrustMomentCmd;
-    thrustMomentCmd[0] = pilot_desired_throttle;
-    thrustMomentCmd[1] = target_roll;
-    thrustMomentCmd[2] = target_pitch;
-    thrustMomentCmd[3] = target_yaw_rate;
-
-    VectorN<float, 4> augmentedCmd = L1AdaptiveAugmentation(thrustMomentCmd);
-
-    attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(
-        augmentedCmd[1], augmentedCmd[2], augmentedCmd[3]);
-
-    attitude_control->set_throttle_out(augmentedCmd[0], true, g.throttle_filt);
     
-    
-    
+    thrustMomentCmd = generateThrustMomentCMD(pilot_desired_throttle, target_pitch, target_roll, target_yaw_rate);
+    VectorN<float, 4> l1ThrustMomentCmd;
+    l1ThrustMomentCmd = L1AdaptiveAugmentation(thrustMomentCmd);
+
+    VectorN<float, 4> motorPWM;
+
+    motorPWM = motorMixing(thrustMomentCmd + l1ThrustMomentCmd);
+
+    if (motorPWM[0] < 0) {motorPWM[0] = 0;}
+    else if (motorPWM[0] > 100) {motorPWM[0] = 100;}
+    if (motorPWM[1] < 0) {motorPWM[1] = 0;}
+    else if (motorPWM[1] > 100) {motorPWM[1] = 100;}
+    if (motorPWM[2] < 0) {motorPWM[2] = 0;}
+    else if (motorPWM[2] > 100) {motorPWM[2] = 100;}
+    if (motorPWM[3] < 0) {motorPWM[3] = 0;}
+    else if (motorPWM[3] > 100) {motorPWM[3] = 100;}
+
+    if (motors->armed()) {
+        motors->rc_write(0, 1000 + motorEnable * 10 * motorPWM[0]);
+        motors->rc_write(1, 1000 + motorEnable * 10 * motorPWM[1]);
+        motors->rc_write(2, 1000 + motorEnable * 10 * motorPWM[2]);
+        motors->rc_write(3, 1000 + motorEnable * 10 * motorPWM[3]);
+    } else {
+        motors->rc_write(0,0);
+        motors->rc_write(1,0);
+        motors->rc_write(2,0);
+        motors->rc_write(3,0);
+    }
+
 }
 
-VectorN<float, 4> ModeAdaptive::geometricController(Vector3f targetPos,
-                                                    Vector3f targetVel,
-                                                    Vector3f targetAcc,
-                                                    Vector3f targetJerk,
-                                                    Vector3f targetSnap,
-                                                    Vector2f targetYaw,
-                                                    Vector2f targetYaw_dot,
-                                                    Vector2f targetYaw_ddot)
-{
-    Vector3f r_error;
-    Vector3f v_error;
-    Vector3f target_force;
-    Vector3f z_axis;
-    Vector3f x_axis_desired;
-    Vector3f y_axis_desired;
-    Vector3f x_c_des;
-    Vector3f eR, ew, M;
-    Vector3f e3 = {0, 0, 1};
+VectorN<float, 4> ModeAdaptive::generateThrustMomentCMD(float target_thrust,
+                                                        float target_pitch,
+                                                        float target_roll,
+                                                        float target_yaw_rate) {
 
-    Vector3f statePos;
-    Vector3f stateVel;
+    // const float dt = 0.0025; // sampling time (update rate at 400 Hz)
+    float current_pitch = ahrs.get_pitch();
+    float current_roll = ahrs.get_roll();
+    float current_yaw_rate = ahrs.get_gyro_latest()[2];
+    
 
-    Vector2f positionNE;
+    float pitch_error = target_pitch - current_pitch;
+    float roll_error = target_roll - current_roll;
+    float yaw_rate_error = target_yaw_rate - current_yaw_rate;
 
-    int locAvailable = ahrs.get_relative_position_NED_origin(statePos);
-    if (!locAvailable)
-    {
-        gcs().send_text(MAV_SEVERITY_CRITICAL, "location unavailable.");
-    }
-
-    // Ground velocity in meters/second, North/East/Down
-    // order. Check if have_inertial_nav() is true before assigning values to stateVel.
-    if (ahrs.have_inertial_nav())
-    {
-        if(ahrs.get_velocity_NED(stateVel)){;}
-    }
-    else
-    {
-        gcs().send_text(MAV_SEVERITY_CRITICAL, "inertial navigation is inactive");
-    }
-
-    // Position Error (ep)
-    r_error = statePos - targetPos;
-
-    // Velocity Error (ev)
-    v_error = stateVel - targetVel;
-
-    // Target force
-    target_force.x = kg_vehicleMass * targetAcc.x - g.GeoCtrl_Kpx * r_error.x - g.GeoCtrl_Kvx * v_error.x;
-    target_force.y = kg_vehicleMass * targetAcc.y - g.GeoCtrl_Kpy * r_error.y - g.GeoCtrl_Kvy * v_error.y;
-    target_force.z = kg_vehicleMass * (targetAcc.z - GRAVITY_MAGNITUDE) - g.GeoCtrl_Kpz * r_error.z - g.GeoCtrl_Kvz * v_error.z;
-
-    // Z-Axis [zB]
-    Quaternion q;
-    ahrs.get_quat_body_to_ned(q);
-
-    Matrix3f R;
-    q.rotation_matrix(R); // transforming the quaternion q to rotation matrix R
-
-    z_axis = R.colz();
-
-    // target thrust [F]
-    float target_thrust = -target_force * z_axis;
-
-    // Calculate axis [zB_des]
-    Vector3f z_axis_desired = -target_force;
-    z_axis_desired.normalize();
-
-    // [xC_des]
-    // x_axis_desired = z_axis_desired x [cos(yaw), sin(yaw), 0]^T
-    x_c_des[0] = targetYaw[0]; // x
-    x_c_des[1] = targetYaw[1]; // y
-    x_c_des[2] = 0;            // z
-
-    Vector3f x_c_des_dot = {targetYaw_dot, 0};   // time derivative of x_c_des
-    Vector3f x_c_des_ddot = {targetYaw_ddot, 0}; // time derivative of x_c_des_dot
-
-    // [yB_des]
-    y_axis_desired = (z_axis_desired % x_c_des);
-    y_axis_desired.normalize();
-    // [xB_des]
-    x_axis_desired = y_axis_desired % z_axis_desired;
-
-    // [eR]
-    Matrix3f Rdes(Vector3f(x_axis_desired.x, y_axis_desired.x, z_axis_desired.x),
-                  Vector3f(x_axis_desired.y, y_axis_desired.y, z_axis_desired.y),
-                  Vector3f(x_axis_desired.z, y_axis_desired.z, z_axis_desired.z));
-
-    Matrix3f eRM = (Rdes.transposed() * R - R.transposed() * Rdes) / 2;
-    eR = veeOperator(eRM);
-
-    Vector3f Omega = AP::ahrs().get_gyro();
-
-    // compute Omegad: this comes from Appendix F in https://arxiv.org/pdf/1003.2005v3.pdf
-    Vector3f a_error; // error on acceleration
-    a_error = e3 * GRAVITY_MAGNITUDE - R.colz() * target_thrust / kg_vehicleMass - targetAcc;
-
-    Vector3f target_force_dot; // derivative of target_force
-    target_force_dot.x = -g.GeoCtrl_Kpx * v_error.x - g.GeoCtrl_Kvx * a_error.x + kg_vehicleMass * targetJerk.x;
-    target_force_dot.y = -g.GeoCtrl_Kpy * v_error.y - g.GeoCtrl_Kvy * a_error.y + kg_vehicleMass * targetJerk.y;
-    target_force_dot.z = -g.GeoCtrl_Kpz * v_error.z - g.GeoCtrl_Kvz * a_error.z + kg_vehicleMass * targetJerk.z;
-
-    Vector3f b3_dot = R * hatOperator(Omega) * e3;
-
-    float target_thrust_dot = -target_force_dot * R.colz() - target_force * b3_dot;
-
-    Vector3f j_error; // error on jerk
-    j_error = -R.colz() * target_thrust_dot / kg_vehicleMass - b3_dot * target_thrust / kg_vehicleMass - targetJerk;
-
-    Vector3f target_force_ddot; // derivative of target_force_dot
-    target_force_ddot.x = -g.GeoCtrl_Kpx * a_error.x - g.GeoCtrl_Kvx * j_error.x + kg_vehicleMass * targetSnap.x;
-    target_force_ddot.y = -g.GeoCtrl_Kpy * a_error.y - g.GeoCtrl_Kvy * j_error.y + kg_vehicleMass * targetSnap.y;
-    target_force_ddot.z = -g.GeoCtrl_Kpz * a_error.z - g.GeoCtrl_Kvz * j_error.z + kg_vehicleMass * targetSnap.z;
-
-    VectorN<float, 9> b3cCollection;                                                // collection of three three-dimensional vectors b3c, b3c_dot, b3c_ddot
-    b3cCollection = unit_vec(-target_force, -target_force_dot, -target_force_ddot); // unit_vec function is from geometric controller's git repo: https://github.com/fdcl-gwu/uav_geometric_control/blob/master/matlab/aux_functions/deriv_unit_vector.m
-
-    Vector3f b3c;
-    Vector3f b3c_dot;
-    Vector3f b3c_ddot;
-
-    b3c[0] = b3cCollection[0];
-    b3c[1] = b3cCollection[1];
-    b3c[2] = b3cCollection[2];
-
-    b3c_dot[0] = b3cCollection[3];
-    b3c_dot[1] = b3cCollection[4];
-    b3c_dot[2] = b3cCollection[5];
-
-    b3c_ddot[0] = b3cCollection[6];
-    b3c_ddot[1] = b3cCollection[7];
-    b3c_ddot[2] = b3cCollection[8];
-
-    Vector3f A2 = -hatOperator(x_c_des) * b3c;
-    Vector3f A2_dot = -hatOperator(x_c_des_dot) * b3c - hatOperator(x_c_des) * b3c_dot;
-    Vector3f A2_ddot = -hatOperator(x_c_des_ddot) * b3c - hatOperator(x_c_des_dot) * b3c_dot * 2 - hatOperator(x_c_des) * b3c_ddot;
-
-    VectorN<float, 9> b2cCollection;               // collection of three three-dimensional vectors b2c, b2c_dot, b2c_ddot
-    b2cCollection = unit_vec(A2, A2_dot, A2_ddot); // unit_vec function is from geometric controller's git repo: https://github.com/fdcl-gwu/uav_geometric_control/blob/master/matlab/aux_functions/deriv_unit_vector.m
-
-    Vector3f b2c;
-    Vector3f b2c_dot;
-    Vector3f b2c_ddot;
-
-    b2c[0] = b2cCollection[0];
-    b2c[1] = b2cCollection[1];
-    b2c[2] = b2cCollection[2];
-
-    b2c_dot[0] = b2cCollection[3];
-    b2c_dot[1] = b2cCollection[4];
-    b2c_dot[2] = b2cCollection[5];
-
-    b2c_ddot[0] = b2cCollection[6];
-    b2c_ddot[1] = b2cCollection[7];
-    b2c_ddot[2] = b2cCollection[8];
-
-    Vector3f b1c_dot = hatOperator(b2c_dot) * b3c + hatOperator(b2c) * b3c_dot;
-    Vector3f b1c_ddot = hatOperator(b2c_ddot) * b3c + hatOperator(b2c_dot) * b3c_dot * 2 + hatOperator(b2c) * b3c_ddot;
-
-    Matrix3f Rd_dot;  // derivative of Rdes
-    Matrix3f Rd_ddot; // derivative of Rd_dot
-
-    Rd_dot.a = b1c_dot;
-    Rd_dot.b = b2c_dot;
-    Rd_dot.c = b3c_dot;
-    Rd_dot.transpose();
-
-    Rd_ddot.a = b1c_ddot;
-    Rd_ddot.b = b2c_ddot;
-    Rd_ddot.c = b3c_ddot;
-    Rd_ddot.transpose();
-
-    Vector3f Omegad = veeOperator(Rdes.transposed() * Rd_dot);
-    Vector3f Omegad_dot = veeOperator(Rdes.transposed() * Rd_ddot - hatOperator(Omegad) * hatOperator(Omegad));
-
-    // eomega (angular velocity error)
-    ew = Omega - R.transposed() * Rdes * Omegad;
-
-    // Compute the moment
-    M.x = -g.GeoCtrl_KRx * eR.x - g.GeoCtrl_KOx * ew.x;
-    M.y = -g.GeoCtrl_KRy * eR.y - g.GeoCtrl_KOy * ew.y;
-    M.z = -g.GeoCtrl_KRz * eR.z - g.GeoCtrl_KOz * ew.z;
-    M = M - J * (hatOperator(Omega) * R.transposed() * Rdes * Omegad - R.transposed() * Rdes * Omegad_dot);
-    Vector3f momentAdd = Omega % (J * Omega); // J is the inertia matrix
-    M = M + momentAdd;
+    float thrust = g.custom_KThrust * attitude_control->get_throttle_boosted(target_thrust) * 10;
+    float M_x = g.custom_KPr * roll_error / 1000;
+    float M_y = g.custom_KPp * pitch_error / 1000;
+    float M_z = g.custom_KPy * yaw_rate_error / 100000;
 
     VectorN<float, 4> thrustMomentCmd;
-    thrustMomentCmd[0] = target_thrust;
-    thrustMomentCmd[1] = M.x;
-    thrustMomentCmd[2] = M.y;
-    thrustMomentCmd[3] = M.z;
-
-    // logging
-    // log the desired rotation matrix and the actual rotation matrix
-    AP::logger().Write("L1AF", "Rd11,Rd12,Rd13,Rd21,Rd22,Rd23,Rd31,Rd32,Rd33", "fffffffff",
-                       Rdes.a.x,
-                       Rdes.a.y,
-                       Rdes.a.z,
-                       Rdes.b.x,
-                       Rdes.b.y,
-                       Rdes.b.z,
-                       Rdes.c.x,
-                       Rdes.c.y,
-                       Rdes.c.z);
-    AP::logger().Write("L1AG", "R11,R12,R13,R21,R22,R23,R31,R32,R33", "fffffffff",
-                       R.a.x,
-                       R.a.y,
-                       R.a.z,
-                       R.b.x,
-                       R.b.y,
-                       R.b.z,
-                       R.c.x,
-                       R.c.y,
-                       R.c.z);
+    thrustMomentCmd[0] = thrust;
+    thrustMomentCmd[1] = M_x;
+    thrustMomentCmd[2] = M_y;
+    thrustMomentCmd[3] = M_z;
+    
 
     return thrustMomentCmd;
+
 }
 
 VectorN<float, 4> ModeAdaptive::L1AdaptiveAugmentation(VectorN<float, 4> thrustMomentCmd)

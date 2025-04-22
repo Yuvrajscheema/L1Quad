@@ -40,7 +40,6 @@ public:
         AUTO_RTL =     27,  // Auto RTL, this is not a true mode, AUTO will report as this mode if entered to perform a DO_LAND_START Landing sequence
         TURTLE =       28,  // Flip over after crash
         ADAPTIVE =     29, // adaptive control
-
         // Mode number 127 reserved for the "drone show mode" in the Skybrush
         // fork at https://github.com/skybrush-io/ardupilot
     };
@@ -1966,15 +1965,10 @@ public:
     VectorN<float,4> lpf2_prev; // previously stored state in the 2nd low-pass filter
     Vector2f sigma_um_hat_prev; // previously stored estimated unmatched uncertainty
 
-    float radiusX;  // circle radius or figure8's x radius
-    float radiusY;  // figure8's y radius (not used for circle radius)
-    int8_t trajIndex; // index of the trajectory
     int8_t motorEnable; // whether to raise motor PWM
-    float targetSpeed; // target speed of the trajectory
 
     // the variables below are defined for the landing procedure
     uint8_t landingTriggered; // indicator of whether a landing command has been triggered (via setting g2.landingFlag to 1)
-    Vector3f currentPosition; // storing the current position of the vehicle (NED in meters)
     Vector3f currentVelocity; // storing the current velocity of the vehicle (NED in meters per second)
     float currentYaw; // storing the current yaw angle of the vehicle
     float landingTimeOffset; // store the time when the land command is triggered
@@ -1986,14 +1980,10 @@ protected:
     // The name() and name4() methods are for logging and display purposes.
 
 private:
-    VectorN<float, 4> geometricController(Vector3f targetPos,
-                                                    Vector3f targetVel,
-                                                    Vector3f targetAcc,
-                                                    Vector3f targetJerk,
-                                                    Vector3f targetSnap,
-                                                    Vector2f targetYaw,
-                                                    Vector2f targetYaw_dot,
-                                                    Vector2f targetYaw_ddot);
+    VectorN<float, 4> generateThrustMomentCMD(float target_thrust,
+                                                float target_pitch,
+                                                float target_roll,
+                                                float target_yaw_rate);
     VectorN<float, 4> L1AdaptiveAugmentation(VectorN<float, 4> thrustMomentCmd);
     VectorN<float,9> unit_vec(Vector3f q, Vector3f q_dot, Vector3f q_ddot);
     Matrix3f hatOperator(Vector3f input);

@@ -461,6 +461,31 @@
 #ifndef LANDFLAG_DEFAULT
  #define LANDFLAG_DEFAULT          0.0
 #endif
+
+#ifndef CUSTOM_KPP_DEFAULT
+ #define CUSTOM_KPP_DEFAULT 0.0
+#endif
+
+#ifndef CUSTOM_KPR_DEFAULT
+ #define CUSTOM_KPR_DEFAULT 0.0
+#endif
+
+#ifndef CUSTOM_KPY_DEFAULT
+ #define CUSTOM_KPY_DEFAULT 0.0
+#endif
+
+#ifndef CUSTOM_KDP_DEFAULT
+ #define CUSTOM_KDP_DEFAULT 0.0
+#endif
+
+#ifndef CUSTOM_KDR_DEFAULT
+ #define CUSTOM_KDR_DEFAULT 0.0
+#endif
+
+#ifndef CUSTOM_KTHRUST_DEFAULT
+ #define CUSTOM_KTHRUST_DEFAULT 1.0
+#endif
+
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
